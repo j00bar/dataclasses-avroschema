@@ -27,19 +27,6 @@ class AvroBaseModel(BaseModel, AvroModel):  # type: ignore
     def json_schema(cls: Type[CT], *args: Any, **kwargs: Any) -> str:
         return json.dumps(cls.model_json_schema(*args, **kwargs))
 
-    @classmethod
-    def standardize_type(cls: Type[CT], data: dict) -> Any:
-        """
-        Standardization factory that converts data according to the
-        user-defined pydantic json_encoders prior to passing values
-        to the standard type conversion factory
-        """
-        for value in data.values():
-            if isinstance(value, dict):
-                cls.standardize_type(value)
-
-        return standardize_custom_type(data)
-
     def asdict(self, standardize_factory: Optional[Callable[..., Any]] = None) -> JsonDict:
         """
         Returns this model in dictionary form. This method differs from
@@ -47,13 +34,15 @@ class AvroBaseModel(BaseModel, AvroModel):  # type: ignore
         It also doesn't provide the exclude, include, by_alias, etc.
         parameters that dict provides.
         """
-        data = self.model_dump()
-        standardize_method = standardize_factory or self.standardize_type
+        standardize_method = standardize_factory or standardize_custom_type
 
-        # the standardize called can be replaced if we have a custom implementation of asdict
-        # for now I think is better to use the native implementation
-        return standardize_method(data)
-
+        return {
+            field_name: standardize_method(
+                field_name=field_name, value=value, model=self, base_class=AvroBaseModel
+            )
+            for field_name, value in self.model_dump().items()
+        }
+    
     @classmethod
     def parse_obj(cls: Type[CT], data: Dict) -> CT:
         return cls.model_validate(obj=data)
@@ -66,7 +55,7 @@ class AvroBaseModel(BaseModel, AvroModel):  # type: ignore
         schema = self.avro_schema_to_python()
 
         return serialization.serialize(
-            self.asdict(standardize_factory=self.standardize_type),
+            self.asdict(),
             schema,
             serialization_type=serialization_type,
         )

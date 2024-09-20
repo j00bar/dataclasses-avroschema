@@ -1,4 +1,4 @@
-from typing import Any, Callable, Optional, Type, TypeVar
+from typing import Any, Callable, Dict, Optional, Type, TypeVar
 
 from fastavro.validation import validate
 
@@ -26,23 +26,21 @@ class AvroBaseModel(BaseModel, AvroModel):  # type: ignore
     def json_schema(cls: Type[CT], *args: Any, **kwargs: Any) -> str:
         return cls.schema_json(*args, **kwargs)
 
-    @classmethod
-    def standardize_type(cls: Type[CT], data: dict) -> Any:
+    def _standardize_type(self) -> Dict[str, Any]:
         """
         Standardization factory that converts data according to the
         user-defined pydantic json_encoders prior to passing values
         to the standard type conversion factory
         """
-        encoders = cls.__config__.json_encoders
+        encoders = self.__config__.json_encoders
+        data = dict(self)
+
         for k, v in data.items():
             v_type = type(v)
             if v_type in encoders:
                 encode_method = encoders[v_type]
                 data[k] = encode_method(v)
-            elif isinstance(v, dict):
-                cls.standardize_type(v)
-
-        return standardize_custom_type(data)
+        return data
 
     def asdict(self, standardize_factory: Optional[Callable[..., Any]] = None) -> JsonDict:
         """
@@ -51,13 +49,14 @@ class AvroBaseModel(BaseModel, AvroModel):  # type: ignore
         It also doesn't provide the exclude, include, by_alias, etc.
         parameters that dict provides.
         """
-        data = dict(self)
-
-        standardize_method = standardize_factory or self.standardize_type
-
-        # the standardize called can be replaced if we have a custom implementation of asdict
-        # for now I think is better to use the native implementation
-        return standardize_method(data)
+        standardize_method = standardize_factory or standardize_custom_type
+        
+        return {
+            field_name: standardize_method(
+                field_name=field_name, value=value, model=self, base_class=AvroBaseModel
+            )
+            for field_name, value in self._standardize_type().items()
+        }
 
     def serialize(self, serialization_type: str = AVRO) -> bytes:
         """
@@ -67,7 +66,7 @@ class AvroBaseModel(BaseModel, AvroModel):  # type: ignore
         schema = self.avro_schema_to_python()
 
         return serialization.serialize(
-            self.asdict(standardize_factory=self.standardize_type),
+            self.asdict(),
             schema,
             serialization_type=serialization_type,
         )

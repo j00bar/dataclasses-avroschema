@@ -117,10 +117,12 @@ class AvroModel:
 
     def asdict(self, standardize_factory: Optional[Callable[..., Any]] = None) -> JsonDict:
         if standardize_factory is not None:
-            return dataclasses.asdict(
-                self,
-                dict_factory=lambda x: {key: standardize_factory(value) for key, value in x},
-            )  # type: ignore
+            return {
+                field.name: standardize_factory(
+                    field_name=field.name, value=getattr(self, field.name), model=self, base_class=AvroModel
+                )
+                for field in dataclasses.fields(self)  # type: ignore
+            }
         return dataclasses.asdict(self)  # type: ignore
 
     def serialize(self, serialization_type: str = AVRO) -> bytes:

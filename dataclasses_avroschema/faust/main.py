@@ -32,7 +32,12 @@ class AvroRecord(Record, AvroModel):  # type: ignore
         user-defined pydantic json_encoders prior to passing values
         to the standard type conversion factory
         """
-        return standardize_custom_type(self)
+        return {
+            field_name: standardize_custom_type(
+                field_name=field_name, value=value, model=self, base_class=AvroRecord
+            )
+            for field_name, value in self.asdict().items()
+        }
 
     def serialize(self, serialization_type: str = AVRO) -> bytes:
         """

@@ -1,5 +1,6 @@
 import dataclasses
 import enum
+import types
 import typing
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -83,17 +84,33 @@ def rebuild_annotation(a_type: typing.Any, field_info: FieldInfo) -> typing.Type
     return Annotated[a_type, field_info]  # type: ignore[return-value]
 
 
-def standardize_custom_type(value: typing.Any) -> typing.Any:
+def standardize_custom_type(*, field_name: str, value: typing.Any, model, base_class) -> typing.Any:
     if isinstance(value, dict):
-        return {k: standardize_custom_type(v) for k, v in value.items()}
+        return {
+            k: standardize_custom_type(field_name=field_name, value=v, model=model, base_class=base_class)
+            for k, v in value.items()
+        }
     elif isinstance(value, list):
-        return [standardize_custom_type(v) for v in value]
+        return [
+            standardize_custom_type(field_name=field_name, value=v, model=model, base_class=base_class) for v in value
+        ]
     elif isinstance(value, tuple):
-        return tuple(standardize_custom_type(v) for v in value)
+        return tuple(
+            standardize_custom_type(field_name=field_name, value=v, model=model, base_class=base_class) for v in value
+        )
     elif isinstance(value, enum.Enum):
         return value.value
-    elif is_pydantic_model(type(value)) or is_faust_record(type(value)):  # type: ignore[arg-type]
-        return standardize_custom_type(value.asdict())
+    elif isinstance(value, base_class):
+        if is_faust_record(type(value)):  # type: ignore[arg-type]
+            # we need to do a trick because we can not overrride asdict from faust..
+            # once the function interface is introduced we can remove this check
+            asdict = value.standardize_type()
+        else:
+            asdict = value.asdict(standardize_factory=standardize_custom_type)
+
+        if isinstance(model.__annotations__[field_name], types.UnionType):
+            return (value.__class__.__name__, asdict)
+        return asdict
 
     return value
 
